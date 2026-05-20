@@ -1,0 +1,48 @@
+{
+  "name": "copilot-api-gateway",
+  "version": "0.1.0",
+  "description": "Local OpenAI/Anthropic-compatible HTTP gateway that proxies to GitHub Copilot. Drop-in for Claude Code, Codex, and other LLM clients.",
+  "type": "module",
+  "bin": {
+    "copilot-api-gateway": "./dist/cli.js",
+    "copilot-api": "./dist/cli.js"
+  },
+  "main": "./dist/server.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js start",
+    "auth": "tsx src/cli.ts auth",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "github-copilot",
+    "copilot",
+    "anthropic",
+    "openai",
+    "proxy",
+    "gateway",
+    "claude-code"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "@hono/node-server": "^1.13.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
