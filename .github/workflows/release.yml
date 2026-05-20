@@ -8,7 +8,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -45,3 +45,57 @@ jobs:
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          VERSION="${{ steps.version_check.outputs.version }}"
+          NOTES_FILE="$(mktemp)"
+          if [ -f CHANGELOG.md ]; then
+            awk -v ver="$VERSION" '
+              BEGIN { found=0 }
+              /^## \[/ {
+                if (found) { exit }
+                if ($0 ~ "^## \\[" ver "\\]") { found=1; next }
+              }
+              found { print }
+            ' CHANGELOG.md > "$NOTES_FILE"
+          fi
+          if [ ! -s "$NOTES_FILE" ]; then
+            printf "Release v%s of %s.\n" "$VERSION" "${{ steps.version_check.outputs.name }}" > "$NOTES_FILE"
+          fi
+          {
+            echo "**Install from npm:**"
+            echo ""
+            echo '```sh'
+            echo "npm install -g ${{ steps.version_check.outputs.name }}@$VERSION"
+            echo '```'
+            echo ""
+            echo "npm: https://www.npmjs.com/package/${{ steps.version_check.outputs.name }}/v/$VERSION"
+          } >> "$NOTES_FILE"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.changelog.outputs.tag }}"
+          NOTES_FILE="${{ steps.changelog.outputs.notes_file }}"
+          TITLE="$TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::notice::Updating existing release $TAG"
+            gh release edit "$TAG" \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --draft=false \
+              --prerelease=false \
+              --latest
+          else
+            echo "::notice::Creating release $TAG"
+            gh release create "$TAG" \
+              --title "$TITLE" \
+              --notes-file "$NOTES_FILE" \
+              --target "${{ github.sha }}" \
+              --latest
+          fi
