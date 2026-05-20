@@ -4,9 +4,9 @@
   "description": "Local OpenAI/Anthropic-compatible HTTP gateway that proxies to GitHub Copilot. Drop-in for Claude Code, Codex, and other LLM clients.",
   "type": "module",
   "bin": {
-    "copilot-api-gateway": "./dist/cli.js"
+    "copilot-api-gateway": "dist/cli.js"
   },
-  "main": "./dist/server.js",
+  "main": "dist/server.js",
   "files": [
     "dist",
     "README.md",
