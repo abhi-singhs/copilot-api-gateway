@@ -2,7 +2,5 @@ src
 tsconfig.json
 tsup.config.ts
 .gitignore
-.editorconfig
 .github
-*.test.ts
 node_modules

@@ -4,8 +4,7 @@
   "description": "Local OpenAI/Anthropic-compatible HTTP gateway that proxies to GitHub Copilot. Drop-in for Claude Code, Codex, and other LLM clients.",
   "type": "module",
   "bin": {
-    "copilot-api-gateway": "./dist/cli.js",
-    "copilot-api": "./dist/cli.js"
+    "copilot-api-gateway": "./dist/cli.js"
   },
   "main": "./dist/server.js",
   "files": [
@@ -13,6 +12,17 @@
     "README.md",
     "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abhi-singhs/copilot-api-gateway.git"
+  },
+  "homepage": "https://github.com/abhi-singhs/copilot-api-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/abhi-singhs/copilot-api-gateway/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsx src/cli.ts",
@@ -30,7 +40,7 @@
     "gateway",
     "claude-code"
   ],
-  "author": "",
+  "author": "Abhi Singh",
   "license": "MIT",
   "engines": {
     "node": ">=20"

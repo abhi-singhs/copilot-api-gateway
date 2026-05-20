@@ -343,7 +343,7 @@ is for you.
 ## Development
 
 ```bash
-git clone <this-repo>
+git clone https://github.com/abhi-singhs/copilot-api-gateway.git
 cd copilot-api-gateway
 npm install
 npm run typecheck
