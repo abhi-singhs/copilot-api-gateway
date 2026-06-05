@@ -34,6 +34,13 @@ export interface Config {
   smallFastModel: string;
   modelList: string[];
   /**
+   * Discover upstream models from Copilot `/models` and expose them from
+   * local `/v1/models`.
+   */
+  modelDiscovery: boolean;
+  /** Cache TTL for discovered models, in milliseconds. */
+  modelsCacheTtlMs: number;
+  /**
    * Models that must be dispatched to the upstream `/responses` endpoint
    * instead of `/chat/completions`. Auto-translated transparently.
    */
@@ -140,6 +147,8 @@ export const loadConfig = (): Config => {
     smallFastModel:
       process.env.COPILOT_API_SMALL_MODEL ?? "claude-sonnet-4.6",
     modelList,
+    modelDiscovery: process.env.COPILOT_API_MODEL_DISCOVERY !== "0",
+    modelsCacheTtlMs: intEnv("COPILOT_API_MODELS_CACHE_TTL_MS", 60_000),
     responsesOnlyModels,
     maxCompletionTokensModels,
     logLevel: (process.env.COPILOT_API_LOG_LEVEL as Config["logLevel"]) ?? "info",

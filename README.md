@@ -22,9 +22,11 @@ Completions API** (`/v1/chat/completions`).
   `message_delta` / `message_stop` events, including incremental
   `input_json_delta` for tool calls
 - ✅ OpenAI Chat Completions passthrough (non-stream + SSE)
-- ✅ **Responses API bridge** — codex / gpt-5.5 / gpt-5.4-mini are accepted
-  on `/v1/chat/completions` and `/v1/messages` and transparently routed
-  through `/responses` upstream
+- ✅ **Automatic model discovery** — `/v1/models` includes all models exposed
+  by your current Copilot account (with local cache + static fallback)
+- ✅ **Responses API bridge + auto-fallback** — models are routed to
+  `/chat/completions` or `/responses` automatically; if one endpoint rejects
+  a model, the gateway retries once on the alternate endpoint
 - ✅ **Per-model shaping** — `gpt-5.4` etc. automatically get
   `max_tokens` rewritten as `max_completion_tokens`
 - ✅ GitHub OAuth device-flow with cached token + automatic Copilot API token
@@ -153,12 +155,17 @@ about 5 minutes before expiry). Both files are `chmod 600`.
 |---------------------------------|-------------------------------------|-------------|
 | `COPILOT_API_DEFAULT_MODEL`     | `claude-sonnet-4.6`                 | reported in `print-env` |
 | `COPILOT_API_SMALL_MODEL`       | `claude-sonnet-4.6`                 | reported in `print-env` |
-| `COPILOT_API_MODELS`            | curated list (see below)            | comma-separated list for `/v1/models` |
+| `COPILOT_API_MODELS`            | curated fallback list (see below)   | comma-separated fallback list for `/v1/models` |
+| `COPILOT_API_MODEL_DISCOVERY`   | `1`                                 | set `0` to disable upstream `/models` discovery |
+| `COPILOT_API_MODELS_CACHE_TTL_MS` | `60000`                           | cache TTL for discovered models |
 | `COPILOT_API_RESPONSES_MODELS`  | `gpt-5.3-codex,gpt-5.2-codex,gpt-5.4-mini,gpt-5.5` | models that must go to `/responses`; transparently bridged |
 | `COPILOT_API_MAX_COMPLETION_TOKENS_MODELS` | `gpt-5.4`                | models that require `max_completion_tokens` instead of `max_tokens` |
 
-The default model list contains models verified to work on the current
-Copilot edge:
+By default, `/v1/models` returns the discovered upstream catalog merged
+with a local fallback list (below). If discovery is unavailable (network,
+token, or upstream issue), the fallback list is still returned.
+
+Fallback list:
 
 ```
 claude-opus-4.7, claude-opus-4.6, claude-sonnet-4.6, claude-sonnet-4.5,
@@ -174,7 +181,9 @@ the gateway translates both ways.
 ### Endpoint dispatch & per-model shaping
 
 The gateway always speaks Chat Completions or Anthropic Messages to its
-clients. Internally it picks the right upstream endpoint per model:
+clients. Internally it picks the right upstream endpoint per model and can
+retry once on the alternate endpoint if the first route returns a
+model-unsupported style error:
 
 | Model | Upstream endpoint | Shaping |
 |---|---|---|

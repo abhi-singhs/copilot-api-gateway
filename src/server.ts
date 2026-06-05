@@ -44,7 +44,7 @@ export const createApp = (cfg: Config) => {
   const gate = masterKeyMiddleware(cfg);
   app.use("/v1/*", gate);
 
-  app.get("/v1/models", modelsRoute(cfg));
+  app.get("/v1/models", modelsRoute(cfg, client, log));
   app.post("/v1/chat/completions", openaiChatRoute(cfg, client, log));
   app.post("/v1/messages", anthropicMessagesRoute(cfg, client, log));
   app.post("/v1/responses", responsesRoute(cfg, client, log));

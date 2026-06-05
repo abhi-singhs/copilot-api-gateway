@@ -96,6 +96,41 @@ export class CopilotClient {
     return tapResponse(res, this.log, `← UPSTREAM ${url}`, this.cfg.logBodies);
   }
 
+  /**
+   * Fetch the upstream model catalog from Copilot.
+   * Retries once on 401 after invalidating cached API token.
+   */
+  async models(): Promise<Response> {
+    const url = `${this.cfg.copilotApiBase}/models`;
+    const sessionId = randomUUID();
+    const requestId = randomUUID();
+
+    const doFetch = async (token: string): Promise<Response> => {
+      const headers = await this.buildHeaders(token, false, sessionId, requestId);
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), this.cfg.requestTimeoutMs);
+      try {
+        return await fetch(url, {
+          method: "GET",
+          headers,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
+    let key = await this.tokens.getToken();
+    let res = await doFetch(key.token);
+    if (res.status === 401) {
+      this.log.warn("upstream /models 401, invalidating cached copilot api token and retrying once");
+      this.tokens.invalidate();
+      key = await this.tokens.getToken();
+      res = await doFetch(key.token);
+    }
+    return tapResponse(res, this.log, `← UPSTREAM ${url}`, this.cfg.logBodies);
+  }
+
   chatCompletions(body: Record<string, unknown>): Promise<Response> {
     return this.post(this.cfg.copilotChatEndpoint, body);
   }

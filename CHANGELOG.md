@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-05
+
+### Added
+
+- Automatic upstream model discovery for `GET /v1/models`: the gateway now
+  queries Copilot's `/models` catalog, caches it (configurable TTL), and
+  merges it with the local fallback list so all account-available models
+  are exposed.
+- Automatic endpoint fallback: chat and Messages requests now retry once on
+  the alternate upstream endpoint (`/chat/completions` ↔ `/responses`) when
+  the first route returns a model-unsupported style error, so newly added
+  models work without manual route-list updates.
+- New configuration: `COPILOT_API_MODEL_DISCOVERY` (default on) and
+  `COPILOT_API_MODELS_CACHE_TTL_MS` (default `60000`).
+
+### Changed
+
+- `COPILOT_API_MODELS` is now treated as a fallback list, returned when
+  upstream discovery is disabled or unavailable.
+
 ## [0.1.0] - 2026-05-20
 
 ### Added
@@ -31,5 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `start`, `auth`, `verify`, `print-key`, `print-env`, and `help` CLI
   commands.
 
-[Unreleased]: https://github.com/abhi-singhs/copilot-api-gateway/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/abhi-singhs/copilot-api-gateway/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/abhi-singhs/copilot-api-gateway/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/abhi-singhs/copilot-api-gateway/releases/tag/v0.1.0

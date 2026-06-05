@@ -19,6 +19,12 @@ import {
 } from "../translate/responses.js";
 import { logBody, tapStream } from "../log-tap.js";
 
+const shouldTryAlternateEndpoint = (status: number, text: string): boolean => {
+  if (status !== 400 && status !== 404 && status !== 422) return false;
+  const lower = text.toLowerCase();
+  return /model|unsupported|not supported|unknown|\/responses|chat\/completions/.test(lower);
+};
+
 export const anthropicMessagesRoute =
   (cfg: Config, client: CopilotClient, log: Logger) => {
   const sanitizeOpts = buildSanitizeOptions(cfg.dropParamsExtra, log);
@@ -50,44 +56,68 @@ export const anthropicMessagesRoute =
       : translatedBody;
 
     const model = typeof sanitizedChat.model === "string" ? sanitizedChat.model : "";
-    const useResponses = isResponsesOnlyModel(model, cfg);
-    const upstreamBody = useResponses
-      ? chatToResponsesRequest(sanitizedChat)
-      : applyModelShape(sanitizedChat, cfg);
+    const responsesBody = chatToResponsesRequest(sanitizedChat);
+    const chatBody = applyModelShape(sanitizedChat, cfg);
+    const tryResponsesFirst = isResponsesOnlyModel(model, cfg);
+    const attemptOrder = tryResponsesFirst ? [true, false] : [false, true];
 
-    log.debug(
-      useResponses
-        ? "anthropic /v1/messages → responses bridge"
-        : "anthropic /v1/messages",
-      {
-        model,
-        stream,
-        route: useResponses ? "/responses" : "/chat/completions",
-        msgs: Array.isArray(sanitizedChat.messages) ? sanitizedChat.messages.length : 0,
-      },
-    );
+    let upstream: Response | null = null;
+    let useResponses = tryResponsesFirst;
+    for (let i = 0; i < attemptOrder.length; i += 1) {
+      useResponses = attemptOrder[i] as boolean;
+      const upstreamBody = useResponses ? responsesBody : chatBody;
 
-    let upstream: Response;
-    try {
-      upstream = useResponses
-        ? await client.responses(upstreamBody)
-        : await client.chatCompletions(upstreamBody);
-    } catch (err) {
-      log.error("upstream request failed:", (err as Error).message);
-      return c.json(
+      log.debug(
+        useResponses
+          ? "anthropic /v1/messages → responses bridge"
+          : "anthropic /v1/messages",
         {
-          type: "error",
-          error: {
-            type: "api_error",
-            message: `Upstream request failed: ${(err as Error).message}`,
-          },
+          model,
+          stream,
+          route: useResponses ? "/responses" : "/chat/completions",
+          msgs: Array.isArray(sanitizedChat.messages) ? sanitizedChat.messages.length : 0,
+          attempt: i + 1,
         },
-        502,
       );
-    }
 
-    if (!upstream.ok && upstream.status >= 400) {
+      try {
+        upstream = useResponses
+          ? await client.responses(upstreamBody)
+          : await client.chatCompletions(upstreamBody);
+      } catch (err) {
+        if (i === 0) {
+          log.warn(
+            "first upstream route failed before response; trying alternate route",
+            { model, attemptedRoute: useResponses ? "/responses" : "/chat/completions" },
+          );
+          continue;
+        }
+        log.error("upstream request failed:", (err as Error).message);
+        return c.json(
+          {
+            type: "error",
+            error: {
+              type: "api_error",
+              message: `Upstream request failed: ${(err as Error).message}`,
+            },
+          },
+          502,
+        );
+      }
+
+      if (upstream.ok || upstream.status < 400) break;
+
       const text = await upstream.text();
+      const canRetry = i === 0 && shouldTryAlternateEndpoint(upstream.status, text);
+      if (canRetry) {
+        log.info("retrying with alternate upstream endpoint for model", {
+          model,
+          status: upstream.status,
+          attemptedRoute: useResponses ? "/responses" : "/chat/completions",
+        });
+        continue;
+      }
+
       log.warn(`upstream error ${upstream.status}: ${text.slice(0, 500)}`);
       // Wrap upstream error in Anthropic error envelope where possible.
       let upstreamErr: unknown;
@@ -112,6 +142,19 @@ export const anthropicMessagesRoute =
           status: upstream.status,
           headers: { "content-type": "application/json" },
         },
+      );
+    }
+
+    if (!upstream) {
+      return c.json(
+        {
+          type: "error",
+          error: {
+            type: "api_error",
+            message: "Upstream request failed on all route attempts",
+          },
+        },
+        502,
       );
     }
 

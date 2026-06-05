@@ -26,6 +26,8 @@ Environment variables (most useful):
   COPILOT_API_TOKEN_DIR         where to cache GitHub credentials
   COPILOT_API_DEFAULT_MODEL     model to advertise/default to
   COPILOT_API_MODELS            comma-separated model list exposed at /v1/models
+  COPILOT_API_MODEL_DISCOVERY   set 0 to disable upstream /models discovery
+  COPILOT_API_MODELS_CACHE_TTL_MS  /v1/models cache TTL in ms (default 60000)
   COPILOT_EDITOR_VERSION        Editor-Version header (default vscode/1.95.0)
   COPILOT_INTEGRATION_ID        Copilot-Integration-Id header (default vscode-chat)
   COPILOT_API_LOG_LEVEL         debug|info|warn|error
