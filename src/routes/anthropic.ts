@@ -11,7 +11,14 @@ import {
   translateStreamResponse,
 } from "../translate/anthropic-response.js";
 import { buildSanitizeOptions, sanitizeRequest } from "../translate/sanitize.js";
-import { applyModelShape, isResponsesOnlyModel } from "../translate/model-shape.js";
+import {
+  applyModelShape,
+  isResponsesOnlyModel,
+  lookupModel,
+  normalizeReasoning,
+  shapeReasoningEffort,
+} from "../translate/model-shape.js";
+import type { ModelCatalog } from "../copilot/model-catalog.js";
 import {
   chatToResponsesRequest,
   responsesStreamToChatStream,
@@ -26,7 +33,7 @@ const shouldTryAlternateEndpoint = (status: number, text: string): boolean => {
 };
 
 export const anthropicMessagesRoute =
-  (cfg: Config, client: CopilotClient, log: Logger) => {
+  (cfg: Config, client: CopilotClient, log: Logger, catalog?: ModelCatalog) => {
   const sanitizeOpts = buildSanitizeOptions(cfg.dropParamsExtra, log);
 
   return async (c: Context) => {
@@ -51,14 +58,25 @@ export const anthropicMessagesRoute =
     // sanitizer once more so a future field that sneaks through the
     // translator (or a custom drop list from COPILOT_API_DROP_PARAMS_EXTRA)
     // is still caught.
-    const sanitizedChat = cfg.dropParams
-      ? sanitizeRequest(translatedBody, sanitizeOpts).body
-      : translatedBody;
+    const sanitizedChat = normalizeReasoning(
+      cfg.dropParams
+        ? sanitizeRequest(translatedBody, sanitizeOpts).body
+        : translatedBody,
+    );
 
     const model = typeof sanitizedChat.model === "string" ? sanitizedChat.model : "";
-    const responsesBody = chatToResponsesRequest(sanitizedChat);
-    const chatBody = applyModelShape(sanitizedChat, cfg);
-    const tryResponsesFirst = isResponsesOnlyModel(model, cfg);
+    const entry = await lookupModel(catalog, model);
+    const reasoningEffort = shapeReasoningEffort(
+      sanitizedChat.reasoning_effort,
+      cfg,
+      entry,
+    );
+
+    const responsesBody = chatToResponsesRequest(sanitizedChat, {
+      reasoningEffort: reasoningEffort ?? null,
+    });
+    const chatBody = applyModelShape(sanitizedChat, cfg, entry);
+    const tryResponsesFirst = isResponsesOnlyModel(model, cfg, entry);
     const attemptOrder = tryResponsesFirst ? [true, false] : [false, true];
 
     let upstream: Response | null = null;

@@ -108,6 +108,7 @@ const userOrSystemContent = (
  */
 export const chatToResponsesRequest = (
   chat: Record<string, unknown>,
+  opts: { reasoningEffort?: string | null } = {},
 ): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
 
@@ -124,6 +125,20 @@ export const chatToResponsesRequest = (
   if (typeof maxTok === "number") {
     out.max_output_tokens = Math.max(16, maxTok);
   }
+
+  // Chat Completions spells this `reasoning_effort`; Responses expects
+  // `reasoning: { effort }`. Callers resolve the effort against the model's
+  // advertised levels and pass `null` to suppress it — the raw request value
+  // is only consulted when the caller didn't resolve one at all, otherwise a
+  // deliberate drop would be undone here.
+  const effort =
+    opts.reasoningEffort === null
+      ? undefined
+      : (opts.reasoningEffort ??
+        (typeof chat.reasoning_effort === "string"
+          ? (chat.reasoning_effort as string)
+          : undefined));
+  if (effort) out.reasoning = { effort };
 
   if (typeof chat.temperature === "number") out.temperature = chat.temperature;
   if (typeof chat.top_p === "number") out.top_p = chat.top_p;

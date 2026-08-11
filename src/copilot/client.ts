@@ -27,6 +27,30 @@ export class CopilotClient {
     private log: Logger,
   ) {}
 
+  private loggedBase: string | null = null;
+
+  /**
+   * Resolve the upstream base URL.
+   *
+   * Copilot's token response carries the tenant's own `endpoints.api` (for
+   * example `https://api.enterprise.githubcopilot.com`), which is the host that
+   * tenant is actually authorized against. Prefer it, unless the operator set
+   * `COPILOT_API_BASE` explicitly.
+   */
+  private baseUrl(key: { endpoints?: { api?: string } }): string {
+    if (this.cfg.copilotApiBaseExplicit) return this.cfg.copilotApiBase;
+    const fromToken = key.endpoints?.api;
+    const base =
+      typeof fromToken === "string" && /^https?:\/\//.test(fromToken)
+        ? fromToken.replace(/\/+$/, "")
+        : this.cfg.copilotApiBase;
+    if (this.loggedBase !== base) {
+      this.loggedBase = base;
+      this.log.debug(`upstream base resolved to ${base}`);
+    }
+    return base;
+  }
+
   private async buildHeaders(
     apiToken: string,
     stream: boolean,
@@ -61,21 +85,25 @@ export class CopilotClient {
     body: Record<string, unknown>,
   ): Promise<Response> {
     const stream = body.stream === true;
-    const url = `${this.cfg.copilotApiBase}${path}`;
     const sessionId = randomUUID();
     const requestId = randomUUID();
 
-    const doFetch = async (token: string): Promise<Response> => {
-      const headers = await this.buildHeaders(token, stream, sessionId, requestId);
+    const doFetch = async (key: {
+      token: string;
+      endpoints?: { api?: string };
+    }): Promise<{ res: Response; url: string }> => {
+      const url = `${this.baseUrl(key)}${path}`;
+      const headers = await this.buildHeaders(key.token, stream, sessionId, requestId);
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), this.cfg.requestTimeoutMs);
       try {
-        return await fetch(url, {
+        const res = await fetch(url, {
           method: "POST",
           headers,
           body: JSON.stringify(body),
           signal: controller.signal,
         });
+        return { res, url };
       } finally {
         clearTimeout(t);
       }
@@ -83,15 +111,15 @@ export class CopilotClient {
 
     let key = await this.tokens.getToken();
     if (this.cfg.logBodies) {
-      logBody(this.log, `→ UPSTREAM ${url}`, body);
+      logBody(this.log, `→ UPSTREAM ${this.baseUrl(key)}${path}`, body);
     }
-    let res = await doFetch(key.token);
+    let { res, url } = await doFetch(key);
 
     if (res.status === 401) {
       this.log.warn("upstream 401, invalidating cached copilot api token and retrying once");
       this.tokens.invalidate();
       key = await this.tokens.getToken();
-      res = await doFetch(key.token);
+      ({ res, url } = await doFetch(key));
     }
     return tapResponse(res, this.log, `← UPSTREAM ${url}`, this.cfg.logBodies);
   }
@@ -101,32 +129,36 @@ export class CopilotClient {
    * Retries once on 401 after invalidating cached API token.
    */
   async models(): Promise<Response> {
-    const url = `${this.cfg.copilotApiBase}/models`;
     const sessionId = randomUUID();
     const requestId = randomUUID();
 
-    const doFetch = async (token: string): Promise<Response> => {
-      const headers = await this.buildHeaders(token, false, sessionId, requestId);
+    const doFetch = async (key: {
+      token: string;
+      endpoints?: { api?: string };
+    }): Promise<{ res: Response; url: string }> => {
+      const url = `${this.baseUrl(key)}/models`;
+      const headers = await this.buildHeaders(key.token, false, sessionId, requestId);
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), this.cfg.requestTimeoutMs);
+      const t = setTimeout(() => controller.abort(), this.cfg.modelsTimeoutMs);
       try {
-        return await fetch(url, {
+        const res = await fetch(url, {
           method: "GET",
           headers,
           signal: controller.signal,
         });
+        return { res, url };
       } finally {
         clearTimeout(t);
       }
     };
 
     let key = await this.tokens.getToken();
-    let res = await doFetch(key.token);
+    let { res, url } = await doFetch(key);
     if (res.status === 401) {
       this.log.warn("upstream /models 401, invalidating cached copilot api token and retrying once");
       this.tokens.invalidate();
       key = await this.tokens.getToken();
-      res = await doFetch(key.token);
+      ({ res, url } = await doFetch(key));
     }
     return tapResponse(res, this.log, `← UPSTREAM ${url}`, this.cfg.logBodies);
   }

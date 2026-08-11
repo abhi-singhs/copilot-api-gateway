@@ -29,6 +29,7 @@
     "start": "node dist/cli.js start",
     "auth": "tsx src/cli.ts auth",
     "typecheck": "tsc --noEmit",
+    "test:models": "node scripts/test-models.mjs",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
