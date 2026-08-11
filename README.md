@@ -62,7 +62,13 @@ COPILOT_API_MASTER_KEY=mysecret npx copilot-api-gateway start
 curl http://127.0.0.1:4000/v1/models -H "Authorization: Bearer mysecret"
 ```
 
-Get the env vars to source into any shell:
+Apply the client env vars to the current shell:
+
+```bash
+eval "$(COPILOT_API_MASTER_KEY=mysecret npx copilot-api-gateway print-env)"
+```
+
+To inspect the exports without applying them:
 
 ```bash
 COPILOT_API_MASTER_KEY=mysecret npx copilot-api-gateway print-env
