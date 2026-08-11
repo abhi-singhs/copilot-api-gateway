@@ -35,9 +35,12 @@ export const DEFAULT_DROPPED_TOP_LEVEL: ReadonlySet<string> = new Set([
   "mcp_servers",
   "prompt_cache_key",
   "safety_identifier",
-  // OpenAI o1/o3-only knobs Copilot doesn't accept on Claude routes:
-  "reasoning",
-  "reasoning_effort",
+  // NOTE: `reasoning` / `reasoning_effort` are deliberately NOT dropped.
+  // Copilot accepts `reasoning_effort` on `/chat/completions` and
+  // `reasoning: { effort }` on `/responses`, and most current models
+  // advertise `capabilities.supports.reasoning_effort`. Per-model handling
+  // lives in `model-shape.ts`, which drops the field only for models that
+  // don't advertise support.
   "modalities",
   "audio",
   "prediction",

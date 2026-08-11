@@ -22,13 +22,19 @@ Completions API** (`/v1/chat/completions`).
   `message_delta` / `message_stop` events, including incremental
   `input_json_delta` for tool calls
 - ✅ OpenAI Chat Completions passthrough (non-stream + SSE)
-- ✅ **Automatic model discovery** — `/v1/models` includes all models exposed
-  by your current Copilot account (with local cache + static fallback)
-- ✅ **Responses API bridge + auto-fallback** — models are routed to
-  `/chat/completions` or `/responses` automatically; if one endpoint rejects
-  a model, the gateway retries once on the alternate endpoint
+- ✅ **Automatic model discovery** — `/v1/models` reflects exactly the models
+  your Copilot account can call, with capability metadata (context window,
+  vision, tool calls, reasoning levels), a local cache and a static fallback
+- ✅ **Catalog-driven endpoint routing** — each model is dispatched to
+  `/chat/completions` or `/responses` based on the `supported_endpoints` the
+  Copilot catalog publishes, so new and retired models route correctly with no
+  config change; a one-shot retry on the alternate endpoint remains as a
+  safety net
 - ✅ **Per-model shaping** — `gpt-5.4` etc. automatically get
   `max_tokens` rewritten as `max_completion_tokens`
+- ✅ **Reasoning passthrough** — `reasoning_effort` is forwarded to models that
+  advertise support (clamped to an advertised level) and dropped for models
+  that don't; translated to `reasoning: { effort }` on the Responses bridge
 - ✅ GitHub OAuth device-flow with cached token + automatic Copilot API token
   refresh
 - ✅ Required Copilot edge headers (`Editor-Version`, `Copilot-Integration-Id`,
@@ -157,42 +163,71 @@ about 5 minutes before expiry). Both files are `chmod 600`.
 | `COPILOT_API_SMALL_MODEL`       | `claude-sonnet-4.6`                 | reported in `print-env` |
 | `COPILOT_API_MODELS`            | curated fallback list (see below)   | comma-separated fallback list for `/v1/models` |
 | `COPILOT_API_MODEL_DISCOVERY`   | `1`                                 | set `0` to disable upstream `/models` discovery |
-| `COPILOT_API_MODELS_CACHE_TTL_MS` | `60000`                           | cache TTL for discovered models |
-| `COPILOT_API_RESPONSES_MODELS`  | `gpt-5.3-codex,gpt-5.2-codex,gpt-5.4-mini,gpt-5.5` | models that must go to `/responses`; transparently bridged |
+| `COPILOT_API_MODELS_CACHE_TTL_MS` | `60000`                           | cache TTL for the discovered catalog |
+| `COPILOT_API_MODELS_FAILURE_BACKOFF_MS` | `30000`                     | how long to wait before retrying discovery after a failure |
+| `COPILOT_API_MODELS_TIMEOUT_MS` | `15000`                             | timeout for the `/models` catalog request (kept short — it sits on the request hot path) |
+| `COPILOT_API_INCLUDE_NON_CHAT_MODELS` | `0`                           | set `1` to also list embedding/completion models in `/v1/models` |
+| `COPILOT_API_REASONING_PASSTHROUGH` | `1`                             | set `0` to strip `reasoning_effort` from all requests |
+| `COPILOT_API_RESPONSES_MODELS`  | fallback list (see below)           | responses-only models, used **only** when discovery is unavailable |
 | `COPILOT_API_MAX_COMPLETION_TOKENS_MODELS` | `gpt-5.4`                | models that require `max_completion_tokens` instead of `max_tokens` |
 
-By default, `/v1/models` returns the discovered upstream catalog merged
-with a local fallback list (below). If discovery is unavailable (network,
-token, or upstream issue), the fallback list is still returned.
+When upstream discovery succeeds, the live catalog is **authoritative**:
+`/v1/models` returns exactly what your account can call, so retired models
+never linger and newly released ones appear automatically. Non-chat models
+(embeddings, completion) are hidden by default because the gateway exposes no
+endpoint that can call them.
 
-Fallback list:
+The static list is used only when discovery is disabled or upstream is
+unreachable:
 
 ```
-claude-opus-4.7, claude-opus-4.6, claude-sonnet-4.6, claude-sonnet-4.5,
-claude-haiku-4.5, gpt-5.2, gpt-5-mini, gpt-4.1, gpt-4o,
-gemini-2.5-pro, gemini-3.5-flash,
-gpt-5.3-codex, gpt-5.2-codex, gpt-5.4, gpt-5.4-mini, gpt-5.5
+claude-opus-5, claude-sonnet-5, claude-opus-4.8, claude-opus-4.7,
+claude-opus-4.6, claude-sonnet-4.6, claude-sonnet-4.5, claude-haiku-4.5,
+gpt-5.4, gpt-5-mini,
+gemini-3.6-flash, gemini-3.5-flash, gemini-3.1-pro-preview,
+gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5.5, gpt-5.4-mini,
+gpt-5.3-codex, grok-4.5, mai-code-1-flash-picker
 ```
 
-The last five are dispatched to the `/responses` endpoint behind the
-scenes. Clients keep speaking Chat Completions or Anthropic Messages —
-the gateway translates both ways.
+The responses-only fallback list is `chamomile, gpt-5.3-codex, gpt-5.4-mini,
+gpt-5.5, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra, grok-4.5,
+mai-code-1-flash-picker`. Clients keep speaking Chat Completions or Anthropic
+Messages — the gateway translates both ways.
 
 ### Endpoint dispatch & per-model shaping
 
 The gateway always speaks Chat Completions or Anthropic Messages to its
-clients. Internally it picks the right upstream endpoint per model and can
-retry once on the alternate endpoint if the first route returns a
-model-unsupported style error:
+clients. Internally it picks the right upstream endpoint per model from the
+catalog's `supported_endpoints`, and can still retry once on the alternate
+endpoint if the first route returns a model-unsupported style error:
 
 | Model | Upstream endpoint | Shaping |
 |---|---|---|
 | Default | `POST /chat/completions` | none |
 | `gpt-5.4` (and any listed in `COPILOT_API_MAX_COMPLETION_TOKENS_MODELS`) | `POST /chat/completions` | `max_tokens` → `max_completion_tokens` |
-| `gpt-5.3-codex`, `gpt-5.2-codex`, `gpt-5.4-mini`, `gpt-5.5` (and any listed in `COPILOT_API_RESPONSES_MODELS`) | `POST /responses` | Chat ↔ Responses bidirectional translation, incl. streaming and tool calls |
+| Models whose catalog entry omits `/chat/completions` — currently `gpt-5.6-sol/terra/luna`, `gpt-5.5`, `gpt-5.4-mini`, `gpt-5.3-codex`, `grok-4.5`, `mai-code-1-flash-picker`, `chamomile` | `POST /responses` | Chat ↔ Responses bidirectional translation, incl. streaming and tool calls |
+
+### Reasoning effort
+
+Most current models publish the `reasoning_effort` levels they accept. The
+gateway forwards the client's requested level when the model supports it,
+clamps it to the nearest advertised level when it doesn't (for example `xhigh`
+→ `high` on a `low/medium/high` model), and drops the field entirely for models
+with no reasoning support — so a single client config works across every model.
+
+On the Responses bridge the field is translated to `reasoning: { effort }`.
+Clients may send either spelling; `reasoning: { effort }` is normalized on the
+way in. Set `COPILOT_API_REASONING_PASSTHROUGH=0` to disable this entirely.
 
 `POST /v1/responses` is also exposed for callers who already speak the
 native OpenAI Responses API.
+
+### Upstream base URL
+
+Copilot's token response includes the tenant's own API host (for example
+`https://api.enterprise.githubcopilot.com`). The gateway uses that host
+automatically, which matters for enterprise and proxima tenants that are not
+authorized against the public host. Set `COPILOT_API_BASE` to override.
 
 ### Copilot edge headers
 
@@ -270,7 +305,28 @@ flow above. Streaming is supported.
 
 ### `GET /v1/models`
 
-Returns the configured model list.
+Returns the models your Copilot account can actually call, in OpenAI
+`list` shape, enriched with capability metadata:
+
+```json
+{
+  "id": "gpt-5.4",
+  "object": "model",
+  "created": 1786432695,
+  "owned_by": "OpenAI",
+  "context_window": 1050000,
+  "max_output_tokens": 128000,
+  "capabilities": {
+    "streaming": true,
+    "tool_calls": true,
+    "vision": true,
+    "reasoning_effort": ["none", "low", "medium", "high", "xhigh"]
+  }
+}
+```
+
+`context_window` and `capabilities` are non-standard extensions; clients that
+only read `id` are unaffected.
 
 ### `GET /health`
 
@@ -292,9 +348,13 @@ The defaults are conservative — anything Copilot accepts passes through.
 ```
 anthropic_version, anthropic_beta, thinking, cache_control, metadata,
 service_tier, extra_headers, extra_body, container, mcp_servers,
-prompt_cache_key, safety_identifier, reasoning, reasoning_effort,
+prompt_cache_key, safety_identifier,
 modalities, audio, prediction, store, web_search_options
 ```
+
+`reasoning` and `reasoning_effort` are deliberately **not** dropped here —
+Copilot accepts them, so they are handled per-model instead (see
+[Reasoning effort](#reasoning-effort)).
 
 **Keys stripped from every message, content block, and tool (recursive):**
 
@@ -361,6 +421,24 @@ node dist/cli.js help
 
 # live dev with tsx
 npm run dev -- start
+```
+
+### Model matrix smoke test
+
+`npm run test:models` exercises one model per routing/vendor path against a
+running gateway — chat, streaming, tool calls, and Anthropic `/v1/messages` —
+and asserts `/v1/models` advertises nothing that upstream can't serve. It
+exits non-zero on failure, so Copilot catalog drift is caught early.
+
+```bash
+# in one shell
+COPILOT_API_MASTER_KEY=devkey npm run dev -- start
+
+# in another
+TEST_BASE=http://127.0.0.1:4000 COPILOT_API_MASTER_KEY=devkey npm run test:models
+
+# test a specific set instead of the defaults
+TEST_MODELS="claude-opus-5,gpt-5.6-sol" npm run test:models
 ```
 
 ## Security notes

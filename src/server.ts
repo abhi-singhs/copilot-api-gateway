@@ -4,6 +4,7 @@ import type { Config } from "./config.js";
 import { createLogger } from "./logger.js";
 import { CopilotTokenManager } from "./copilot/token.js";
 import { CopilotClient } from "./copilot/client.js";
+import { ModelCatalog } from "./copilot/model-catalog.js";
 import { masterKeyMiddleware } from "./auth/master-key.js";
 import { modelsRoute } from "./routes/models.js";
 import { openaiChatRoute } from "./routes/openai.js";
@@ -14,6 +15,7 @@ export const createApp = (cfg: Config) => {
   const log = createLogger(cfg.logLevel);
   const tokens = new CopilotTokenManager(cfg, log);
   const client = new CopilotClient(cfg, tokens, log);
+  const catalog = new ModelCatalog(cfg, client, log);
 
   const app = new Hono();
 
@@ -44,9 +46,9 @@ export const createApp = (cfg: Config) => {
   const gate = masterKeyMiddleware(cfg);
   app.use("/v1/*", gate);
 
-  app.get("/v1/models", modelsRoute(cfg, client, log));
-  app.post("/v1/chat/completions", openaiChatRoute(cfg, client, log));
-  app.post("/v1/messages", anthropicMessagesRoute(cfg, client, log));
+  app.get("/v1/models", modelsRoute(cfg, catalog, log));
+  app.post("/v1/chat/completions", openaiChatRoute(cfg, client, log, catalog));
+  app.post("/v1/messages", anthropicMessagesRoute(cfg, client, log, catalog));
   app.post("/v1/responses", responsesRoute(cfg, client, log));
 
   return { app, log };
